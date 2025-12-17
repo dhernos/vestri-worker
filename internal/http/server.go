@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"vestri-worker/internal/settings"
 )
 
 func Start(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/settings", settingsHandler)
 	mux.HandleFunc("/fs/read", readFileHandler)
 	mux.HandleFunc("/fs/write", writeFileHandler)
 
@@ -37,7 +39,8 @@ func readFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath, err := safePath("/tmp/vestri", path)
+	base := settings.Get().FsBasePath
+	fullPath, err := safePath(base, path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -49,7 +52,6 @@ func readFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
 	w.Write(data)
 }
 
@@ -64,28 +66,24 @@ func writeFileHandler(w http.ResponseWriter, r *http.Request) {
 		Content string `json:"content"`
 	}
 
-	err := json.NewDecoder(r.Body).Decode(&body)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
-	fullPath, err := safePath("/tmp/vestri", body.Path)
+	base := settings.Get().FsBasePath
+	fullPath, err := safePath(base, body.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	dir := filepath.Dir(fullPath)
-	err = os.MkdirAll(dir, 0755)
-	if err != nil {
-		log.Printf("Error creating directories: %v", err)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		http.Error(w, "cannot create directories", http.StatusInternalServerError)
 		return
 	}
 
-	err = os.WriteFile(fullPath, []byte(body.Content), 0644)
-	if err != nil {
+	if err := os.WriteFile(fullPath, []byte(body.Content), 0644); err != nil {
 		http.Error(w, "cannot write file", http.StatusInternalServerError)
 		return
 	}

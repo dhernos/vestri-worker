@@ -16,8 +16,15 @@ func main() {
 	}
 
 	cfg := settings.Get()
-
-	if err := http.Start(cfg.HTTPPort); err != nil {
-		log.Fatal(err)
-	}
+        if cfg.UseTLS {
+                log.Println("starting HTTP server with TLS enabled")
+                if err := http.StartTLS(cfg.HTTPPort, cfg.TLSCert, cfg.TLSKey); err != nil {
+                    log.Fatal(err)
+                }
+        } else {
+                log.Println("starting HTTP server without TLS")
+                if err := http.Start(cfg.HTTPPort); err != nil {
+                    log.Fatal(err)
+                }
+        }
 }

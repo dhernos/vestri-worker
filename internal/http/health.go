@@ -21,7 +21,10 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	client := http.Client{
 		Timeout: 2 * time.Second,
 	}
-	resp, err := client.Get("https://www.google.com")
+	resp, err := client.Head("https://www.google.com")
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil || resp.StatusCode != http.StatusOK {
 		status.ExternalService = "NOT OK"
 		status.Status = "NOT OK"

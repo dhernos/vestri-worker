@@ -9,6 +9,7 @@ import (
 
 var (
 	current Settings
+	apiKey  string
 	mu      sync.RWMutex
 )
 
@@ -34,7 +35,7 @@ func Load(path string) error {
 		return err
 	}
 
-	var s Settings
+	s := Default()
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
@@ -54,5 +55,17 @@ func Get() Settings {
 func Set(s Settings) {
 	mu.Lock()
 	current = s
+	mu.Unlock()
+}
+
+func GetAPIKey() string {
+	mu.RLock()
+	defer mu.RUnlock()
+	return apiKey
+}
+
+func SetAPIKey(key string) {
+	mu.Lock()
+	apiKey = key
 	mu.Unlock()
 }

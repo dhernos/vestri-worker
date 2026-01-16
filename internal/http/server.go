@@ -17,6 +17,7 @@ func router() http.Handler {
 	mux.HandleFunc("/fs/list", fs.ListDirHandler)
 	mux.HandleFunc("/fs/upload", fs.UploadFileHandler)
 	mux.HandleFunc("/fs/download", fs.DownloadFileHandler)
+	mux.HandleFunc("/fs/delete", fs.DeleteHandler)
 	mux.HandleFunc("/fs/zip", fs.ZipHandler)
 	mux.HandleFunc("/fs/unzip", fs.UnzipHandler)
 	mux.HandleFunc("/stack/up", stack.StackUpHandler)

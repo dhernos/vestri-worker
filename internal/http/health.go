@@ -27,7 +27,6 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil || resp.StatusCode != http.StatusOK {
 		status.ExternalService = "NOT OK"
-		status.Status = "NOT OK"
 	}
 
 	w.Header().Set("Content-Type", "application/json")

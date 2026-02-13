@@ -462,6 +462,8 @@ func describeExecStartError(err error) string {
 		return "interactive console PTY resize failed on this worker runtime"
 	case strings.Contains(lower, "docker exec launch failed"):
 		return "failed to launch docker exec for interactive console"
+	case strings.Contains(lower, "no container found"), strings.Contains(lower, "is not running"):
+		return "interactive console is unavailable because the game server container is not running"
 	default:
 		return "failed to start interactive console session"
 	}

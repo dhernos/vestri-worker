@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -16,37 +17,33 @@ func ptySupported() bool {
 }
 
 func startComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShell string, size terminalSize) (*exec.Cmd, *os.File, error) {
-	cmd, err := composeCommandContext(ctx, stackPath, "exec", service, "sh", "-lc", bootstrapShell)
+	cmd, master, slave, err := prepareComposeExecPTY(ctx, stackPath, service, bootstrapShell, size)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compose command setup failed: %w", err)
-	}
-
-	master, slave, err := openPTY()
-	if err != nil {
-		return nil, nil, fmt.Errorf("pty open failed: %w", err)
+		return nil, nil, err
 	}
 	defer slave.Close()
 
-	if err := setPTYSize(master, size); err != nil {
-		_ = master.Close()
-		return nil, nil, fmt.Errorf("pty resize failed: %w", err)
-	}
-
-	cmd.Stdin = slave
-	cmd.Stdout = slave
-	cmd.Stderr = slave
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid:  true,
-		Setctty: true,
-		Ctty:    int(slave.Fd()),
-	}
-
-	if err := cmd.Start(); err != nil {
+	if err := startComposeExecWithPTY(cmd, slave, true); err == nil {
+		return cmd, master, nil
+	} else if !shouldRetryExecWithoutControllingTTY(err) {
 		_ = master.Close()
 		return nil, nil, fmt.Errorf("docker exec launch failed: %w", err)
 	}
 
-	return cmd, master, nil
+	_ = master.Close()
+
+	fallbackCmd, fallbackMaster, fallbackSlave, err := prepareComposeExecPTY(ctx, stackPath, service, bootstrapShell, size)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer fallbackSlave.Close()
+
+	if err := startComposeExecWithPTY(fallbackCmd, fallbackSlave, false); err != nil {
+		_ = fallbackMaster.Close()
+		return nil, nil, fmt.Errorf("docker exec launch failed: %w", err)
+	}
+
+	return fallbackCmd, fallbackMaster, nil
 }
 
 func resizePTY(file *os.File, size terminalSize) error {
@@ -81,6 +78,50 @@ func openPTY() (*os.File, *os.File, error) {
 	master := os.NewFile(uintptr(masterFD), "/dev/ptmx")
 	slave := os.NewFile(uintptr(slaveFD), slaveName)
 	return master, slave, nil
+}
+
+func prepareComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShell string, size terminalSize) (*exec.Cmd, *os.File, *os.File, error) {
+	cmd, err := composeCommandContext(ctx, stackPath, "exec", service, "sh", "-lc", bootstrapShell)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("compose command setup failed: %w", err)
+	}
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	master, slave, err := openPTY()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("pty open failed: %w", err)
+	}
+	if err := setPTYSize(master, size); err != nil {
+		_ = master.Close()
+		_ = slave.Close()
+		return nil, nil, nil, fmt.Errorf("pty resize failed: %w", err)
+	}
+
+	return cmd, master, slave, nil
+}
+
+func startComposeExecWithPTY(cmd *exec.Cmd, slave *os.File, useControllingTTY bool) error {
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = slave
+	if useControllingTTY {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setsid:  true,
+			Setctty: true,
+			Ctty:    int(slave.Fd()),
+		}
+	} else {
+		cmd.SysProcAttr = nil
+	}
+	return cmd.Start()
+}
+
+func shouldRetryExecWithoutControllingTTY(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "setctty") || strings.Contains(lower, "operation not permitted")
 }
 
 func setPTYSize(file *os.File, size terminalSize) error {

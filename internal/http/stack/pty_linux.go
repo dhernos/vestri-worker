@@ -22,6 +22,9 @@ func startComposeAttachPTY(ctx context.Context, stackPath, service string, size 
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := validateAttachContainerIO(ctx, containerID); err != nil {
+		return nil, nil, err
+	}
 
 	cmd, master, slave, err := prepareDockerAttachPTY(ctx, containerID, size)
 	if err != nil {
@@ -149,6 +152,40 @@ func resolveComposeServiceContainerID(ctx context.Context, stackPath, service st
 	}
 
 	return "", fmt.Errorf("no running container found for service %q", service)
+}
+
+func validateAttachContainerIO(ctx context.Context, containerID string) error {
+	cmd := exec.CommandContext(
+		ctx,
+		"docker",
+		"inspect",
+		"--format",
+		"{{.State.Running}} {{.Config.OpenStdin}} {{.Config.Tty}}",
+		containerID,
+	)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("container inspect failed: %w", err)
+	}
+
+	fields := strings.Fields(strings.TrimSpace(out.String()))
+	if len(fields) < 3 {
+		return fmt.Errorf("container inspect returned unexpected output")
+	}
+	if strings.ToLower(fields[0]) != "true" {
+		return fmt.Errorf("container is not running")
+	}
+	if strings.ToLower(fields[1]) != "true" {
+		return fmt.Errorf("container stdin is disabled (stdin_open=false)")
+	}
+	if strings.ToLower(fields[2]) != "true" {
+		return fmt.Errorf("container tty is disabled (tty=false)")
+	}
+	return nil
 }
 
 func setPTYSize(file *os.File, size terminalSize) error {

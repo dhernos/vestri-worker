@@ -318,7 +318,7 @@ func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 					if msg.Data == "" {
 						continue
 					}
-					if _, err := ptyFile.Write([]byte(msg.Data)); err != nil {
+					if _, err := ptyFile.Write([]byte(normalizeExecInputData(msg.Data))); err != nil {
 						stop()
 					}
 				case "resize":
@@ -333,7 +333,7 @@ func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if len(payload) > 0 {
-				if _, err := ptyFile.Write(payload); err != nil {
+				if _, err := ptyFile.Write([]byte(normalizeExecInputData(string(payload)))); err != nil {
 					stop()
 				}
 			}
@@ -377,6 +377,15 @@ func finishExecSessionLogs(r *http.Request, stackName, service string, waitMu *s
 		service,
 		r.RemoteAddr,
 	)
+}
+
+func normalizeExecInputData(data string) string {
+	if data == "" {
+		return data
+	}
+	data = strings.ReplaceAll(data, "\r\n", "\n")
+	data = strings.ReplaceAll(data, "\r", "\n")
+	return data
 }
 
 func resolveDefaultComposeService(ctx context.Context, stackPath string) (string, error) {
@@ -461,6 +470,10 @@ func describeExecStartError(err error) string {
 		return "interactive console PTY resize failed on this worker runtime"
 	case strings.Contains(lower, "docker attach launch failed"):
 		return "failed to launch docker attach for interactive console"
+	case strings.Contains(lower, "stdin_open=false"):
+		return "interactive console input is disabled for this container (missing stdin_open: true). Recreate the stack after updating compose."
+	case strings.Contains(lower, "tty=false"):
+		return "interactive console input is disabled for this container (missing tty: true). Recreate the stack after updating compose."
 	case strings.Contains(lower, "no running container found"), strings.Contains(lower, "is not running"):
 		return "interactive console is unavailable because the game server container is not running"
 	default:

@@ -19,6 +19,7 @@ import (
 const (
 	logStreamTailLines      = "200"
 	execResolveServiceLimit = 20 * time.Second
+	execWSReadDeadline      = 5 * time.Minute
 	defaultPTYCols          = 120
 	defaultPTYRows          = 32
 )
@@ -299,7 +300,7 @@ func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 
-		_ = ws.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		_ = ws.SetReadDeadline(time.Now().Add(execWSReadDeadline))
 		opcode, payload, readErr := ws.ReadFrame()
 		if readErr != nil {
 			stop()

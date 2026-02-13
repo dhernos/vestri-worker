@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"vestri-worker/internal/http/fs"
 	"vestri-worker/internal/settings"
@@ -15,6 +16,11 @@ import (
 var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func parseStackName(r *http.Request) (string, error) {
+	stackPath, _, err := parseStackTarget(r, true)
+	return stackPath, err
+}
+
+func parseStackTarget(r *http.Request, ensureDirectory bool) (string, string, error) {
 	type Req struct {
 		Stack string `json:"stack"`
 	}
@@ -24,25 +30,39 @@ func parseStackName(r *http.Request) (string, error) {
 		req.Stack = r.URL.Query().Get("stack")
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return "", fmt.Errorf("bad request: %w", err)
+			return "", "", fmt.Errorf("bad request: %w", err)
 		}
 	}
 
+	req.Stack = strings.TrimSpace(req.Stack)
 	if req.Stack == "" || !validName.MatchString(req.Stack) {
-		return "", fmt.Errorf("invalid stack name")
+		return "", "", fmt.Errorf("invalid stack name")
 	}
 
 	settings := settings.Get()
 	stackPath, err := fs.SafeSubPath(settings.FsBasePath, req.Stack)
 	if err != nil {
-		return "", fmt.Errorf("invalid stack path: %w", err)
+		return "", "", fmt.Errorf("invalid stack path: %w", err)
 	}
 
-	if err := os.MkdirAll(stackPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create stack directory: %w", err)
+	if ensureDirectory {
+		if err := os.MkdirAll(stackPath, 0755); err != nil {
+			return "", "", fmt.Errorf("failed to create stack directory: %w", err)
+		}
 	}
 
-	return stackPath, nil
+	return stackPath, filepath.Base(stackPath), nil
+}
+
+func parseServiceName(r *http.Request) (string, error) {
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
+	if service == "" {
+		return "", nil
+	}
+	if !validName.MatchString(service) {
+		return "", fmt.Errorf("invalid service name")
+	}
+	return service, nil
 }
 
 func StackUpHandler(w http.ResponseWriter, r *http.Request) {

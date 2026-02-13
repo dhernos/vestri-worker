@@ -12,7 +12,7 @@ func ptySupported() bool {
 	return false
 }
 
-func startComposeExecPTY(_ context.Context, _ string, _ string, _ string, _ terminalSize) (*exec.Cmd, *os.File, error) {
+func startComposeAttachPTY(_ context.Context, _ string, _ string, _ terminalSize) (*exec.Cmd, *os.File, error) {
 	return nil, nil, errPTYUnsupported
 }
 

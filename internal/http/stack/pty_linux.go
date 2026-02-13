@@ -3,6 +3,7 @@
 package stack
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -16,31 +17,36 @@ func ptySupported() bool {
 	return true
 }
 
-func startComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShell string, size terminalSize) (*exec.Cmd, *os.File, error) {
-	cmd, master, slave, err := prepareComposeExecPTY(ctx, stackPath, service, bootstrapShell, size)
+func startComposeAttachPTY(ctx context.Context, stackPath, service string, size terminalSize) (*exec.Cmd, *os.File, error) {
+	containerID, err := resolveComposeServiceContainerID(ctx, stackPath, service)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmd, master, slave, err := prepareDockerAttachPTY(ctx, containerID, size)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer slave.Close()
 
-	if err := startComposeExecWithPTY(cmd, slave, true); err == nil {
+	if err := startDockerAttachWithPTY(cmd, slave, true); err == nil {
 		return cmd, master, nil
 	} else if !shouldRetryExecWithoutControllingTTY(err) {
 		_ = master.Close()
-		return nil, nil, fmt.Errorf("docker exec launch failed: %w", err)
+		return nil, nil, fmt.Errorf("docker attach launch failed: %w", err)
 	}
 
 	_ = master.Close()
 
-	fallbackCmd, fallbackMaster, fallbackSlave, err := prepareComposeExecPTY(ctx, stackPath, service, bootstrapShell, size)
+	fallbackCmd, fallbackMaster, fallbackSlave, err := prepareDockerAttachPTY(ctx, containerID, size)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer fallbackSlave.Close()
 
-	if err := startComposeExecWithPTY(fallbackCmd, fallbackSlave, false); err != nil {
+	if err := startDockerAttachWithPTY(fallbackCmd, fallbackSlave, false); err != nil {
 		_ = fallbackMaster.Close()
-		return nil, nil, fmt.Errorf("docker exec launch failed: %w", err)
+		return nil, nil, fmt.Errorf("docker attach launch failed: %w", err)
 	}
 
 	return fallbackCmd, fallbackMaster, nil
@@ -80,13 +86,7 @@ func openPTY() (*os.File, *os.File, error) {
 	return master, slave, nil
 }
 
-func prepareComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShell string, size terminalSize) (*exec.Cmd, *os.File, *os.File, error) {
-	cmd, err := composeCommandContext(ctx, stackPath, "exec", service, "sh", "-lc", bootstrapShell)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("compose command setup failed: %w", err)
-	}
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-
+func prepareDockerAttachPTY(ctx context.Context, containerID string, size terminalSize) (*exec.Cmd, *os.File, *os.File, error) {
 	master, slave, err := openPTY()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("pty open failed: %w", err)
@@ -97,10 +97,13 @@ func prepareComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShe
 		return nil, nil, nil, fmt.Errorf("pty resize failed: %w", err)
 	}
 
+	cmd := exec.CommandContext(ctx, "docker", "attach", "--sig-proxy=false", containerID)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
 	return cmd, master, slave, nil
 }
 
-func startComposeExecWithPTY(cmd *exec.Cmd, slave *os.File, useControllingTTY bool) error {
+func startDockerAttachWithPTY(cmd *exec.Cmd, slave *os.File, useControllingTTY bool) error {
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = slave
@@ -122,6 +125,30 @@ func shouldRetryExecWithoutControllingTTY(err error) bool {
 	}
 	lower := strings.ToLower(err.Error())
 	return strings.Contains(lower, "setctty") || strings.Contains(lower, "operation not permitted")
+}
+
+func resolveComposeServiceContainerID(ctx context.Context, stackPath, service string) (string, error) {
+	cmd, err := composeCommandContext(ctx, stackPath, "ps", "-q", service)
+	if err != nil {
+		return "", fmt.Errorf("compose command setup failed: %w", err)
+	}
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("compose service container lookup failed: %w", err)
+	}
+
+	for _, line := range strings.Split(out.String(), "\n") {
+		containerID := strings.TrimSpace(line)
+		if containerID != "" {
+			return containerID, nil
+		}
+	}
+
+	return "", fmt.Errorf("no running container found for service %q", service)
 }
 
 func setPTYSize(file *os.File, size terminalSize) error {

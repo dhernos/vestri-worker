@@ -199,8 +199,7 @@ func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	bootstrapShell := "if command -v bash >/dev/null 2>&1; then exec bash -il; fi; if command -v sh >/dev/null 2>&1; then exec sh -il; fi; exec /bin/sh"
-	cmd, ptyFile, err := startComposeExecPTY(ctx, stackPath, service, bootstrapShell, readInitialTerminalSize(r))
+	cmd, ptyFile, err := startComposeAttachPTY(ctx, stackPath, service, readInitialTerminalSize(r))
 	if err != nil {
 		msg := describeExecStartError(err)
 		_ = writeExecWSMessage(ws, execWSMessage{
@@ -460,9 +459,9 @@ func describeExecStartError(err error) string {
 		return "interactive console PTY could not be opened on this worker runtime"
 	case strings.Contains(lower, "pty resize failed"):
 		return "interactive console PTY resize failed on this worker runtime"
-	case strings.Contains(lower, "docker exec launch failed"):
-		return "failed to launch docker exec for interactive console"
-	case strings.Contains(lower, "no container found"), strings.Contains(lower, "is not running"):
+	case strings.Contains(lower, "docker attach launch failed"):
+		return "failed to launch docker attach for interactive console"
+	case strings.Contains(lower, "no running container found"), strings.Contains(lower, "is not running"):
 		return "interactive console is unavailable because the game server container is not running"
 	default:
 		return "failed to start interactive console session"

@@ -18,18 +18,18 @@ func ptySupported() bool {
 func startComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShell string, size terminalSize) (*exec.Cmd, *os.File, error) {
 	cmd, err := composeCommandContext(ctx, stackPath, "exec", service, "sh", "-lc", bootstrapShell)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("compose command setup failed: %w", err)
 	}
 
 	master, slave, err := openPTY()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("pty open failed: %w", err)
 	}
 	defer slave.Close()
 
 	if err := setPTYSize(master, size); err != nil {
 		_ = master.Close()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("pty resize failed: %w", err)
 	}
 
 	cmd.Stdin = slave
@@ -43,7 +43,7 @@ func startComposeExecPTY(ctx context.Context, stackPath, service, bootstrapShell
 
 	if err := cmd.Start(); err != nil {
 		_ = master.Close()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("docker exec launch failed: %w", err)
 	}
 
 	return cmd, master, nil

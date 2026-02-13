@@ -106,6 +106,11 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+	serviceLabel := service
+	if serviceLabel == "" {
+		serviceLabel = "all"
+	}
+	_, _ = io.WriteString(streamWriter, fmt.Sprintf("[vestri] live log stream connected (service=%s)\n", serviceLabel))
 
 	log.Printf(
 		"stack %s %s action=logs stream start stack=%q service=%q from=%s",
@@ -197,10 +202,7 @@ func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	bootstrapShell := "if command -v bash >/dev/null 2>&1; then exec bash -il; fi; if command -v sh >/dev/null 2>&1; then exec sh -il; fi; exec /bin/sh"
 	cmd, ptyFile, err := startComposeExecPTY(ctx, stackPath, service, bootstrapShell, readInitialTerminalSize(r))
 	if err != nil {
-		msg := "failed to start interactive console session"
-		if errors.Is(err, errPTYUnsupported) {
-			msg = errPTYUnsupported.Error()
-		}
+		msg := describeExecStartError(err)
 		_ = writeExecWSMessage(ws, execWSMessage{
 			Type:    "error",
 			Message: msg,
@@ -442,4 +444,25 @@ func writeExecWSMessage(ws *wsConn, msg execWSMessage) error {
 		return err
 	}
 	return ws.WriteFrame(wsOpcodeText, data)
+}
+
+func describeExecStartError(err error) string {
+	if err == nil {
+		return "failed to start interactive console session"
+	}
+	if errors.Is(err, errPTYUnsupported) {
+		return "interactive console PTY is not available on this worker"
+	}
+
+	lower := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lower, "pty open failed"):
+		return "interactive console PTY could not be opened on this worker runtime"
+	case strings.Contains(lower, "pty resize failed"):
+		return "interactive console PTY resize failed on this worker runtime"
+	case strings.Contains(lower, "docker exec launch failed"):
+		return "failed to launch docker exec for interactive console"
+	default:
+		return "failed to start interactive console session"
+	}
 }

@@ -59,18 +59,23 @@ func ListDirHandler(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]listEntry, 0, len(entries))
 	for _, entry := range entries {
-		entryType := "file"
-		if entry.IsDir() {
-			entryType = "dir"
-		} else if entry.Type()&os.ModeSymlink != 0 {
-			entryType = "symlink"
-		} else if !entry.Type().IsRegular() {
-			entryType = "other"
-		}
-
+		entryMode := entry.Type()
 		size := int64(0)
 		if info, err := entry.Info(); err == nil {
+			entryMode = info.Mode()
 			size = info.Size()
+		}
+
+		// Never expose symlinks in browser listings.
+		if entryMode&os.ModeSymlink != 0 {
+			continue
+		}
+
+		entryType := "file"
+		if entryMode.IsDir() || entry.IsDir() {
+			entryType = "dir"
+		} else if !entryMode.IsRegular() {
+			entryType = "other"
 		}
 
 		result = append(result, listEntry{

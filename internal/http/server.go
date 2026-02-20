@@ -16,6 +16,7 @@ func router() http.Handler {
 	mux.HandleFunc("/fs/write", fs.WriteFileHandler)
 	mux.HandleFunc("/fs/list", fs.ListDirHandler)
 	mux.HandleFunc("/fs/upload", fs.UploadFileHandler)
+	mux.HandleFunc("/fs/fetch", fs.FetchRemoteFileHandler)
 	mux.HandleFunc("/fs/download", fs.DownloadFileHandler)
 	mux.HandleFunc("/fs/delete", fs.DeleteHandler)
 	mux.HandleFunc("/fs/zip", fs.ZipHandler)

@@ -18,6 +18,7 @@ import (
 
 const (
 	logStreamTailLines      = "200"
+	logStreamTailAll        = "all"
 	execResolveServiceLimit = 20 * time.Second
 	execWSReadDeadline      = 5 * time.Minute
 	defaultPTYCols          = 120
@@ -70,13 +71,23 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	logOptions, err := parseLogStreamOptions(r)
+	if err != nil {
+		logStackOpError(r, "logs stream", stackName, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	flusher, hasFlusher := w.(http.Flusher)
+	if logOptions.follow && !hasFlusher {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 
-	args := []string{"logs", "-f", "--no-color", "--tail=" + logStreamTailLines}
+	args := []string{"logs", "--no-color", "--tail=" + logOptions.tail}
+	if logOptions.follow {
+		args = append(args, "-f")
+	}
 	if service != "" {
 		args = append(args, service)
 	}
@@ -92,9 +103,12 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	streamWriter := &flushStreamWriter{
-		w:       w,
-		flusher: flusher,
+	var streamWriter io.Writer = w
+	if hasFlusher {
+		streamWriter = &flushStreamWriter{
+			w:       w,
+			flusher: flusher,
+		}
 	}
 	cmd.Stdout = streamWriter
 	cmd.Stderr = streamWriter
@@ -106,19 +120,18 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-	serviceLabel := service
-	if serviceLabel == "" {
-		serviceLabel = "all"
+	if hasFlusher {
+		flusher.Flush()
 	}
-	_, _ = io.WriteString(streamWriter, fmt.Sprintf("[vestri] live log stream connected (service=%s)\n", serviceLabel))
 
 	log.Printf(
-		"stack %s %s action=logs stream start stack=%q service=%q from=%s",
+		"stack %s %s action=logs stream start stack=%q service=%q follow=%t tail=%q from=%s",
 		r.Method,
 		r.URL.Path,
 		stackName,
 		service,
+		logOptions.follow,
+		logOptions.tail,
 		r.RemoteAddr,
 	)
 
@@ -126,11 +139,13 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(r.Context().Err(), context.Canceled) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			log.Printf(
-				"stack %s %s action=logs stream stop stack=%q service=%q from=%s reason=client_disconnect",
+				"stack %s %s action=logs stream stop stack=%q service=%q follow=%t tail=%q from=%s reason=client_disconnect",
 				r.Method,
 				r.URL.Path,
 				stackName,
 				service,
+				logOptions.follow,
+				logOptions.tail,
 				r.RemoteAddr,
 			)
 			return
@@ -140,13 +155,51 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf(
-		"stack %s %s action=logs stream stop stack=%q service=%q from=%s reason=command_exit",
+		"stack %s %s action=logs stream stop stack=%q service=%q follow=%t tail=%q from=%s reason=command_exit",
 		r.Method,
 		r.URL.Path,
 		stackName,
 		service,
+		logOptions.follow,
+		logOptions.tail,
 		r.RemoteAddr,
 	)
+}
+
+type logStreamOptions struct {
+	follow bool
+	tail   string
+}
+
+func parseLogStreamOptions(r *http.Request) (logStreamOptions, error) {
+	opts := logStreamOptions{
+		follow: true,
+		tail:   logStreamTailLines,
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("follow")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return opts, fmt.Errorf("invalid follow value")
+		}
+		opts.follow = parsed
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("tail")); raw != "" {
+		lower := strings.ToLower(raw)
+		if lower == logStreamTailAll {
+			opts.tail = logStreamTailAll
+			return opts, nil
+		}
+
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return opts, fmt.Errorf("invalid tail value")
+		}
+		opts.tail = strconv.Itoa(parsed)
+	}
+
+	return opts, nil
 }
 
 func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {

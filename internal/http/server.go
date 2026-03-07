@@ -26,6 +26,7 @@ func router() http.Handler {
 	mux.HandleFunc("/stack/restart", stack.StackRestartHandler)
 	mux.HandleFunc("/stack/status", stack.StackStatusHandler)
 	mux.HandleFunc("/stack/logs/stream", stack.StackLogsStreamHandler)
+	mux.HandleFunc("/stack/logs/ws", stack.StackLogsWebSocketHandler)
 	mux.HandleFunc("/stack/exec/ws", stack.StackExecWebSocketHandler)
 	return withMiddlewares(mux)
 }

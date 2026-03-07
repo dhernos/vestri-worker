@@ -40,6 +40,10 @@ type flushStreamWriter struct {
 	flusher http.Flusher
 }
 
+type logWSWriter struct {
+	ws *wsConn
+}
+
 func (w *flushStreamWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -49,6 +53,16 @@ func (w *flushStreamWriter) Write(p []byte) (int, error) {
 		w.flusher.Flush()
 	}
 	return n, err
+}
+
+func (w *logWSWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if err := w.ws.WriteFrame(wsOpcodeText, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +224,146 @@ func parseLogStreamOptions(r *http.Request) (logStreamOptions, error) {
 	}
 
 	return opts, nil
+}
+
+func StackLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stackPath, stackName, err := parseStackTarget(r, false)
+	if err != nil {
+		logStackOpError(r, "logs ws", "", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	service, err := parseServiceName(r)
+	if err != nil {
+		logStackOpError(r, "logs ws", stackName, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	logOptions, err := parseLogStreamOptions(r)
+	if err != nil {
+		logStackOpError(r, "logs ws", stackName, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	logOptions.follow = true
+
+	ws, err := upgradeWebSocket(w, r)
+	if err != nil {
+		var upgradeErr *wsUpgradeError
+		if errors.As(err, &upgradeErr) {
+			http.Error(w, upgradeErr.Message, upgradeErr.StatusCode)
+			return
+		}
+		logStackOpError(r, "logs ws upgrade", stackName, err)
+		http.Error(w, "failed to upgrade websocket", http.StatusBadRequest)
+		return
+	}
+	defer ws.Close()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	args := []string{"logs", "--no-color", "--tail=" + logOptions.tail, "-f"}
+	if service != "" {
+		args = append(args, service)
+	}
+
+	cmd, err := composeCommandContext(ctx, stackPath, args...)
+	if err != nil {
+		logStackOpError(r, "logs ws", stackName, err)
+		_ = ws.WriteFrame(wsOpcodeText, []byte("failed to prepare compose logs command"))
+		_ = ws.WriteFrame(wsOpcodeClose, nil)
+		return
+	}
+
+	streamWriter := &logWSWriter{ws: ws}
+	cmd.Stdout = streamWriter
+	cmd.Stderr = streamWriter
+
+	if err := cmd.Start(); err != nil {
+		logStackOpError(r, "logs ws", stackName, err)
+		_ = ws.WriteFrame(wsOpcodeText, []byte("failed to start compose logs command"))
+		_ = ws.WriteFrame(wsOpcodeClose, nil)
+		return
+	}
+
+	log.Printf(
+		"stack %s %s action=logs ws start stack=%q service=%q follow=%t tail=%q from=%s",
+		r.Method,
+		r.URL.Path,
+		stackName,
+		service,
+		logOptions.follow,
+		logOptions.tail,
+		r.RemoteAddr,
+	)
+
+	clientDone := make(chan struct{})
+	go func() {
+		defer close(clientDone)
+		for {
+			opcode, payload, readErr := ws.ReadFrame()
+			if readErr != nil {
+				cancel()
+				return
+			}
+
+			switch opcode {
+			case wsOpcodePing:
+				_ = ws.WriteFrame(wsOpcodePong, payload)
+			case wsOpcodeClose:
+				_ = ws.WriteFrame(wsOpcodeClose, payload)
+				cancel()
+				return
+			default:
+				// Logs websocket is output-only; ignore incoming data frames.
+			}
+		}
+	}()
+
+	waitErr := cmd.Wait()
+	cancel()
+	_ = ws.WriteFrame(wsOpcodeClose, nil)
+	_ = ws.Close()
+	<-clientDone
+
+	if waitErr != nil {
+		if errors.Is(waitErr, context.Canceled) ||
+			errors.Is(ctx.Err(), context.Canceled) ||
+			errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			log.Printf(
+				"stack %s %s action=logs ws stop stack=%q service=%q follow=%t tail=%q from=%s reason=client_disconnect",
+				r.Method,
+				r.URL.Path,
+				stackName,
+				service,
+				logOptions.follow,
+				logOptions.tail,
+				r.RemoteAddr,
+			)
+			return
+		}
+		logStackOpError(r, "logs ws", stackName, waitErr)
+		return
+	}
+
+	log.Printf(
+		"stack %s %s action=logs ws stop stack=%q service=%q follow=%t tail=%q from=%s reason=command_exit",
+		r.Method,
+		r.URL.Path,
+		stackName,
+		service,
+		logOptions.follow,
+		logOptions.tail,
+		r.RemoteAddr,
+	)
 }
 
 func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {

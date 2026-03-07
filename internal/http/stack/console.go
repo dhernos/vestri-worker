@@ -123,6 +123,16 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if hasFlusher {
 		flusher.Flush()
 	}
+	if logOptions.follow {
+		// Send an initial chunk so intermediaries switch to streaming mode immediately.
+		if _, err := streamWriter.Write([]byte("\n")); err != nil {
+			if errors.Is(r.Context().Err(), context.Canceled) || errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+				return
+			}
+			logStackOpError(r, "logs stream", stackName, err)
+			return
+		}
+	}
 
 	log.Printf(
 		"stack %s %s action=logs stream start stack=%q service=%q follow=%t tail=%q from=%s",

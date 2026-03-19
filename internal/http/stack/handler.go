@@ -117,6 +117,32 @@ func StackDownHandler(w http.ResponseWriter, r *http.Request) {
 	logStackOp(r, "down", stackName)
 }
 
+func StackPullHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stackPath, err := parseStackName(r)
+	if err != nil {
+		logStackOpError(r, "pull", "", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	stackName := filepath.Base(stackPath)
+
+	out, err := RunCompose(stackPath, "pull")
+	if err != nil {
+		logStackOpError(r, "pull", stackName, err)
+		http.Error(w, out, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(out))
+	logStackOp(r, "pull", stackName)
+}
+
 func StackRestartHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

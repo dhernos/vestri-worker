@@ -27,6 +27,8 @@ type stackImageStatusService struct {
 	ContainerID      string `json:"containerId,omitempty"`
 	ContainerImageID string `json:"containerImageId,omitempty"`
 	LocalImageID     string `json:"localImageId,omitempty"`
+	LocalRepoDigest  string `json:"localRepoDigest,omitempty"`
+	RemoteDigest     string `json:"remoteDigest,omitempty"`
 	UpdateAvailable  bool   `json:"updateAvailable"`
 }
 
@@ -73,6 +75,49 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 	}
 
 	servicesByName := make(map[string]*stackImageStatusService)
+	localImageIDCache := make(map[string]string)
+	localRepoDigestCache := make(map[string]string)
+	remoteDigestCache := make(map[string]string)
+
+	resolveLocalImageID := func(imageName string) string {
+		if value, found := localImageIDCache[imageName]; found {
+			return value
+		}
+		value, err := inspectLocalImageID(imageName)
+		if err != nil {
+			localImageIDCache[imageName] = ""
+			return ""
+		}
+		localImageIDCache[imageName] = value
+		return value
+	}
+
+	resolveLocalRepoDigest := func(imageName string) string {
+		if value, found := localRepoDigestCache[imageName]; found {
+			return value
+		}
+		value, err := inspectLocalRepoDigest(imageName)
+		if err != nil {
+			localRepoDigestCache[imageName] = ""
+			return ""
+		}
+		localRepoDigestCache[imageName] = value
+		return value
+	}
+
+	resolveRemoteDigest := func(imageName string) string {
+		if value, found := remoteDigestCache[imageName]; found {
+			return value
+		}
+		value, err := inspectRemoteImageDigest(imageName)
+		if err != nil {
+			remoteDigestCache[imageName] = ""
+			return ""
+		}
+		remoteDigestCache[imageName] = value
+		return value
+	}
+
 	for _, item := range items {
 		serviceName := strings.TrimSpace(item.Service)
 		imageName := strings.TrimSpace(item.Image)
@@ -95,24 +140,41 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 		if containerRef == "" {
 			containerRef = strings.TrimSpace(item.Name)
 		}
-		if containerRef == "" {
-			continue
-		}
-		if entry.ContainerID == "" {
+		if containerRef != "" && entry.ContainerID == "" {
 			entry.ContainerID = containerRef
 		}
 
-		containerImageID, err := inspectContainerImageID(containerRef)
-		if err == nil && entry.ContainerImageID == "" {
+		containerImageID := ""
+		if containerRef != "" {
+			containerImageID, err = inspectContainerImageID(containerRef)
+		}
+		if containerImageID != "" && entry.ContainerImageID == "" {
 			entry.ContainerImageID = containerImageID
 		}
 
-		localImageID, err := inspectLocalImageID(imageName)
-		if err == nil && entry.LocalImageID == "" {
+		localImageID := resolveLocalImageID(imageName)
+		if localImageID != "" && entry.LocalImageID == "" {
 			entry.LocalImageID = localImageID
 		}
 
+		localRepoDigest := resolveLocalRepoDigest(imageName)
+		if localRepoDigest != "" && entry.LocalRepoDigest == "" {
+			entry.LocalRepoDigest = localRepoDigest
+		}
+
+		remoteDigest := resolveRemoteDigest(imageName)
+		if remoteDigest != "" && entry.RemoteDigest == "" {
+			entry.RemoteDigest = remoteDigest
+		}
+
+		// 1) If the running container image differs from the local tagged image,
+		// an update was already pulled and is pending a restart.
 		if containerImageID != "" && localImageID != "" && containerImageID != localImageID {
+			entry.UpdateAvailable = true
+		}
+		// 2) If the remote registry digest differs from the local digest,
+		// a newer image exists remotely (even before pull).
+		if remoteDigest != "" && localRepoDigest != "" && remoteDigest != localRepoDigest {
 			entry.UpdateAvailable = true
 		}
 	}
@@ -180,6 +242,102 @@ func inspectLocalImageID(imageName string) (string, error) {
 		return "", fmt.Errorf("image name is required")
 	}
 	return runDockerCommand("image", "inspect", "--format", "{{.Id}}", imageName)
+}
+
+func inspectLocalRepoDigest(imageName string) (string, error) {
+	imageName = strings.TrimSpace(imageName)
+	if imageName == "" {
+		return "", fmt.Errorf("image name is required")
+	}
+
+	output, err := runDockerCommand("image", "inspect", "--format", "{{json .RepoDigests}}", imageName)
+	if err != nil {
+		return "", err
+	}
+
+	var repoDigests []string
+	if err := json.Unmarshal([]byte(output), &repoDigests); err != nil {
+		return "", fmt.Errorf("failed to parse local repo digests: %w", err)
+	}
+
+	for _, repoDigest := range repoDigests {
+		if digest := digestFromRepoDigest(repoDigest); digest != "" {
+			return digest, nil
+		}
+	}
+	return "", fmt.Errorf("no local repo digest available for image")
+}
+
+func inspectRemoteImageDigest(imageName string) (string, error) {
+	imageName = strings.TrimSpace(imageName)
+	if imageName == "" {
+		return "", fmt.Errorf("image name is required")
+	}
+
+	output, err := runDockerCommand("manifest", "inspect", "--verbose", imageName)
+	if err != nil {
+		return "", err
+	}
+
+	digest, err := parseManifestInspectDigest(output)
+	if err != nil {
+		return "", err
+	}
+	return digest, nil
+}
+
+type manifestInspectVerbose struct {
+	Descriptor struct {
+		Digest string `json:"digest"`
+	} `json:"Descriptor"`
+	Digest string `json:"Digest"`
+}
+
+func parseManifestInspectDigest(output string) (string, error) {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return "", fmt.Errorf("empty manifest inspect output")
+	}
+
+	var single manifestInspectVerbose
+	if err := json.Unmarshal([]byte(trimmed), &single); err == nil {
+		if digest := normalizeDigest(single.Descriptor.Digest); digest != "" {
+			return digest, nil
+		}
+		if digest := normalizeDigest(single.Digest); digest != "" {
+			return digest, nil
+		}
+	}
+
+	var list []manifestInspectVerbose
+	if err := json.Unmarshal([]byte(trimmed), &list); err == nil {
+		for _, item := range list {
+			if digest := normalizeDigest(item.Descriptor.Digest); digest != "" {
+				return digest, nil
+			}
+			if digest := normalizeDigest(item.Digest); digest != "" {
+				return digest, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no remote digest found in manifest inspect output")
+}
+
+func digestFromRepoDigest(repoDigest string) string {
+	parts := strings.SplitN(strings.TrimSpace(repoDigest), "@", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	return normalizeDigest(parts[1])
+}
+
+func normalizeDigest(raw string) string {
+	digest := strings.ToLower(strings.TrimSpace(raw))
+	if strings.HasPrefix(digest, "sha256:") {
+		return digest
+	}
+	return ""
 }
 
 func runDockerCommand(args ...string) (string, error) {

@@ -77,7 +77,9 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 	servicesByName := make(map[string]*stackImageStatusService)
 	localImageIDCache := make(map[string]string)
 	localRepoDigestCache := make(map[string]string)
+	localRepoDigestsCache := make(map[string][]string)
 	remoteDigestCache := make(map[string]string)
+	remoteDigestsCache := make(map[string][]string)
 
 	resolveLocalImageID := func(imageName string) string {
 		if value, found := localImageIDCache[imageName]; found {
@@ -105,6 +107,20 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 		return value
 	}
 
+	resolveLocalRepoDigests := func(imageName string) []string {
+		if value, found := localRepoDigestsCache[imageName]; found {
+			return append([]string(nil), value...)
+		}
+		values, err := inspectLocalRepoDigests(imageName)
+		if err != nil {
+			localRepoDigestsCache[imageName] = nil
+			return nil
+		}
+		copied := append([]string(nil), values...)
+		localRepoDigestsCache[imageName] = copied
+		return append([]string(nil), copied...)
+	}
+
 	resolveRemoteDigest := func(imageName string) string {
 		if value, found := remoteDigestCache[imageName]; found {
 			return value
@@ -116,6 +132,20 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 		}
 		remoteDigestCache[imageName] = value
 		return value
+	}
+
+	resolveRemoteDigests := func(imageName string) []string {
+		if value, found := remoteDigestsCache[imageName]; found {
+			return append([]string(nil), value...)
+		}
+		values, err := inspectRemoteImageDigests(imageName)
+		if err != nil {
+			remoteDigestsCache[imageName] = nil
+			return nil
+		}
+		copied := append([]string(nil), values...)
+		remoteDigestsCache[imageName] = copied
+		return append([]string(nil), copied...)
 	}
 
 	for _, item := range items {
@@ -161,11 +191,13 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 		if localRepoDigest != "" && entry.LocalRepoDigest == "" {
 			entry.LocalRepoDigest = localRepoDigest
 		}
+		localRepoDigests := resolveLocalRepoDigests(imageName)
 
 		remoteDigest := resolveRemoteDigest(imageName)
 		if remoteDigest != "" && entry.RemoteDigest == "" {
 			entry.RemoteDigest = remoteDigest
 		}
+		remoteDigests := resolveRemoteDigests(imageName)
 
 		// 1) If the running container image differs from the local tagged image,
 		// an update was already pulled and is pending a restart.
@@ -173,8 +205,9 @@ func collectStackImageStatus(stackPath string) (stackImageStatusResponse, error)
 			entry.UpdateAvailable = true
 		}
 		// 2) If the remote registry digest differs from the local digest,
-		// a newer image exists remotely (even before pull).
-		if remoteDigest != "" && localRepoDigest != "" && remoteDigest != localRepoDigest {
+		// a newer image exists remotely (even before pull). Compare digest sets
+		// instead of single values to avoid false positives with manifest lists.
+		if len(remoteDigests) > 0 && len(localRepoDigests) > 0 && !digestSetsOverlap(localRepoDigests, remoteDigests) {
 			entry.UpdateAvailable = true
 		}
 	}
@@ -245,45 +278,71 @@ func inspectLocalImageID(imageName string) (string, error) {
 }
 
 func inspectLocalRepoDigest(imageName string) (string, error) {
+	digests, err := inspectLocalRepoDigests(imageName)
+	if err != nil {
+		return "", err
+	}
+	if len(digests) == 0 {
+		return "", fmt.Errorf("no local repo digest available for image")
+	}
+	return digests[0], nil
+}
+
+func inspectLocalRepoDigests(imageName string) ([]string, error) {
 	imageName = strings.TrimSpace(imageName)
 	if imageName == "" {
-		return "", fmt.Errorf("image name is required")
+		return nil, fmt.Errorf("image name is required")
 	}
 
 	output, err := runDockerCommand("image", "inspect", "--format", "{{json .RepoDigests}}", imageName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	var repoDigests []string
 	if err := json.Unmarshal([]byte(output), &repoDigests); err != nil {
-		return "", fmt.Errorf("failed to parse local repo digests: %w", err)
+		return nil, fmt.Errorf("failed to parse local repo digests: %w", err)
 	}
 
+	digests := make([]string, 0, len(repoDigests))
 	for _, repoDigest := range repoDigests {
 		if digest := digestFromRepoDigest(repoDigest); digest != "" {
-			return digest, nil
+			digests = append(digests, digest)
 		}
 	}
-	return "", fmt.Errorf("no local repo digest available for image")
+	if len(digests) == 0 {
+		return nil, fmt.Errorf("no local repo digest available for image")
+	}
+	return digests, nil
 }
 
 func inspectRemoteImageDigest(imageName string) (string, error) {
+	digests, err := inspectRemoteImageDigests(imageName)
+	if err != nil {
+		return "", err
+	}
+	if len(digests) == 0 {
+		return "", fmt.Errorf("no remote digest found in manifest inspect output")
+	}
+	return digests[0], nil
+}
+
+func inspectRemoteImageDigests(imageName string) ([]string, error) {
 	imageName = strings.TrimSpace(imageName)
 	if imageName == "" {
-		return "", fmt.Errorf("image name is required")
+		return nil, fmt.Errorf("image name is required")
 	}
 
 	output, err := runDockerCommand("manifest", "inspect", "--verbose", imageName)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	digest, err := parseManifestInspectDigest(output)
+	digests, err := parseManifestInspectDigests(output)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return digest, nil
+	return digests, nil
 }
 
 type manifestInspectVerbose struct {
@@ -294,34 +353,56 @@ type manifestInspectVerbose struct {
 }
 
 func parseManifestInspectDigest(output string) (string, error) {
+	digests, err := parseManifestInspectDigests(output)
+	if err != nil {
+		return "", err
+	}
+	if len(digests) == 0 {
+		return "", fmt.Errorf("no remote digest found in manifest inspect output")
+	}
+	return digests[0], nil
+}
+
+func parseManifestInspectDigests(output string) ([]string, error) {
 	trimmed := strings.TrimSpace(output)
 	if trimmed == "" {
-		return "", fmt.Errorf("empty manifest inspect output")
+		return nil, fmt.Errorf("empty manifest inspect output")
+	}
+	digests := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	appendDigest := func(raw string) {
+		digest := normalizeDigest(raw)
+		if digest == "" {
+			return
+		}
+		if _, exists := seen[digest]; exists {
+			return
+		}
+		seen[digest] = struct{}{}
+		digests = append(digests, digest)
 	}
 
 	var single manifestInspectVerbose
 	if err := json.Unmarshal([]byte(trimmed), &single); err == nil {
-		if digest := normalizeDigest(single.Descriptor.Digest); digest != "" {
-			return digest, nil
-		}
-		if digest := normalizeDigest(single.Digest); digest != "" {
-			return digest, nil
+		appendDigest(single.Descriptor.Digest)
+		appendDigest(single.Digest)
+		if len(digests) > 0 {
+			return digests, nil
 		}
 	}
 
 	var list []manifestInspectVerbose
 	if err := json.Unmarshal([]byte(trimmed), &list); err == nil {
 		for _, item := range list {
-			if digest := normalizeDigest(item.Descriptor.Digest); digest != "" {
-				return digest, nil
-			}
-			if digest := normalizeDigest(item.Digest); digest != "" {
-				return digest, nil
-			}
+			appendDigest(item.Descriptor.Digest)
+			appendDigest(item.Digest)
+		}
+		if len(digests) > 0 {
+			return digests, nil
 		}
 	}
 
-	return "", fmt.Errorf("no remote digest found in manifest inspect output")
+	return nil, fmt.Errorf("no remote digest found in manifest inspect output")
 }
 
 func digestFromRepoDigest(repoDigest string) string {
@@ -338,6 +419,30 @@ func normalizeDigest(raw string) string {
 		return digest
 	}
 	return ""
+}
+
+func digestSetsOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	lookup := make(map[string]struct{}, len(a))
+	for _, value := range a {
+		digest := normalizeDigest(value)
+		if digest == "" {
+			continue
+		}
+		lookup[digest] = struct{}{}
+	}
+	for _, value := range b {
+		digest := normalizeDigest(value)
+		if digest == "" {
+			continue
+		}
+		if _, exists := lookup[digest]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func runDockerCommand(args ...string) (string, error) {

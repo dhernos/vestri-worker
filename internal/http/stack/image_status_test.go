@@ -95,3 +95,26 @@ func TestDigestFromRepoDigest(t *testing.T) {
 		})
 	}
 }
+
+func TestParseManifestInspectDigests(t *testing.T) {
+	t.Parallel()
+
+	got, err := parseManifestInspectDigests(`[{"Descriptor":{"digest":"sha256:aaa111"},"Digest":"sha256:bbb222"},{"Descriptor":{"digest":"sha256:aaa111"},"Digest":"sha256:ccc333"}]`)
+	if err != nil {
+		t.Fatalf("parseManifestInspectDigests returned error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 unique digests, got %d (%v)", len(got), got)
+	}
+}
+
+func TestDigestSetsOverlap(t *testing.T) {
+	t.Parallel()
+
+	if !digestSetsOverlap([]string{"sha256:abc"}, []string{"sha256:def", "sha256:abc"}) {
+		t.Fatal("expected overlap to be true")
+	}
+	if digestSetsOverlap([]string{"sha256:abc"}, []string{"sha256:def"}) {
+		t.Fatal("expected overlap to be false")
+	}
+}

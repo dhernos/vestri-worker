@@ -79,5 +79,13 @@ func validatePathNoSymlink(base, full string) error {
 		}
 	}
 
+	crossesMount, err := pathCrossesMountPoint(cleanBase, cleanFull)
+	if err != nil {
+		return err
+	}
+	if crossesMount {
+		return errors.New("path crosses mount point")
+	}
+
 	return nil
 }

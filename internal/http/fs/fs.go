@@ -94,3 +94,51 @@ func WriteFileHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	logPathOp(r, "write", body.Path)
 }
+
+func DeleteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Path      string `json:"path"`
+		Recursive bool   `json:"recursive"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if body.Path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+
+	base := settings.Get().FsBasePath
+	fullPath, err := safePath(base, body.Path)
+	if err != nil {
+		logPathOpError(r, "delete", body.Path, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var removeErr error
+	if body.Recursive {
+		removeErr = os.RemoveAll(fullPath)
+	} else {
+		removeErr = os.Remove(fullPath)
+	}
+	if removeErr != nil {
+		if os.IsNotExist(removeErr) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		logPathOpError(r, "delete", body.Path, removeErr)
+		http.Error(w, "cannot delete path", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	logPathOp(r, "delete", body.Path)
+}

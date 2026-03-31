@@ -30,6 +30,10 @@ func router() http.Handler {
 	mux.HandleFunc("/stack/logs/stream", stack.StackLogsStreamHandler)
 	mux.HandleFunc("/stack/logs/ws", stack.StackLogsWebSocketHandler)
 	mux.HandleFunc("/stack/exec/ws", stack.StackExecWebSocketHandler)
+	mux.HandleFunc("/stack/exec/session", stack.StackExecSessionHandler)
+	mux.HandleFunc("/stack/exec/stream", stack.StackExecStreamHandler)
+	mux.HandleFunc("/stack/exec/input", stack.StackExecInputHandler)
+	mux.HandleFunc("/stack/exec/resize", stack.StackExecResizeHandler)
 	return withMiddlewares(mux)
 }
 

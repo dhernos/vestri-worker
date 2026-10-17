@@ -3,6 +3,7 @@ package stack
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -23,7 +24,10 @@ func RunCompose(stackDir string, args ...string) (string, error) {
 	cmd.Stderr = &out
 
 	err = cmd.Run()
-	return out.String(), err
+	if err != nil {
+		return out.String(), fmt.Errorf("%v: %s", err, out.String())
+	}
+	return out.String(), nil
 }
 
 func composeCommandContext(ctx context.Context, stackDir string, args ...string) (*exec.Cmd, error) {

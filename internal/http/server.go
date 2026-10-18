@@ -23,6 +23,13 @@ func router() http.Handler {
 	mux.HandleFunc("/fs/delete", fs.DeleteHandler)
 	mux.HandleFunc("/fs/zip", fs.ZipHandler)
 	mux.HandleFunc("/fs/unzip", fs.UnzipHandler)
+	mux.HandleFunc("/backup", backupStateHandler)
+	mux.HandleFunc("/backup/settings", backupSettingsHandler)
+	mux.HandleFunc("/backup/create", backupCreateHandler)
+	mux.HandleFunc("/backup/delete", backupDeleteHandler)
+	mux.HandleFunc("/backup/restore", backupRestoreHandler)
+	mux.HandleFunc("/backup/download", backupDownloadHandler)
+	mux.HandleFunc("/backup/upload", backupUploadHandler)
 	mux.HandleFunc("/stack/up", stack.StackUpHandler)
 	mux.HandleFunc("/stack/down", stack.StackDownHandler)
 	mux.HandleFunc("/stack/pull", stack.StackPullHandler)
@@ -40,11 +47,13 @@ func router() http.Handler {
 }
 
 func Start(addr string) error {
+	startScheduler()
 	log.Printf("listening on %s (no TLS)\n", addr)
 	return http.ListenAndServe(addr, router())
 }
 
 func StartTLS(addr, certFile, keyFile string) error {
+	startScheduler()
 	log.Printf("listening on %s (TLS)\n", addr)
 	return http.ListenAndServeTLS(addr, certFile, keyFile, router())
 }

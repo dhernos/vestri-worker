@@ -214,6 +214,10 @@ func Import(root, filename string, source io.Reader, maxBytes int64) (Entry, err
 	lock := lockFor(rootPath)
 	lock.Lock()
 	defer lock.Unlock()
+	policy, err := readPolicy(rootPath)
+	if err != nil {
+		return Entry{}, err
+	}
 	archiveDir, err := ensureBackupDir(rootPath, true)
 	if err != nil {
 		return Entry{}, err
@@ -253,6 +257,9 @@ func Import(root, filename string, source io.Reader, maxBytes int64) (Entry, err
 		dest = filepath.Join(archiveDir, name)
 	}
 	if err := os.Rename(tempName, dest); err != nil {
+		return Entry{}, err
+	}
+	if err := prune(rootPath, policy); err != nil {
 		return Entry{}, err
 	}
 	info, err := os.Stat(dest)
@@ -597,7 +604,12 @@ func listEntries(rootPath string) ([]Entry, error) {
 		}
 		backups = append(backups, Entry{Name: entry.Name(), Size: info.Size(), CreatedAt: info.ModTime().UTC()})
 	}
-	sort.Slice(backups, func(i, j int) bool { return backups[i].CreatedAt.After(backups[j].CreatedAt) })
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].CreatedAt.Equal(backups[j].CreatedAt) {
+			return backups[i].Name > backups[j].Name
+		}
+		return backups[i].CreatedAt.After(backups[j].CreatedAt)
+	})
 	return backups, nil
 }
 
@@ -609,16 +621,15 @@ func prune(rootPath string, policy Policy) error {
 	now := time.Now()
 	dailyCutoff := now.AddDate(0, 0, -policy.KeepDailyDays)
 	weeklyCutoff := dailyCutoff.AddDate(0, 0, -policy.KeepWeeklyWeeks*7)
-	seenDays := make(map[string]bool)
 	seenWeeks := make(map[string]bool)
 	for _, entry := range entries {
 		created := entry.CreatedAt.In(now.Location())
 		remove := false
 		switch {
 		case !created.Before(dailyCutoff):
-			key := created.Format("2006-01-02")
-			remove = seenDays[key]
-			seenDays[key] = true
+			// Keep every recent archive. A user can create several manual backups
+			// on the same day, and each one must remain restorable for the full
+			// daily retention period.
 		case !created.Before(weeklyCutoff):
 			year, week := created.ISOWeek()
 			key := fmt.Sprintf("%04d-%02d", year, week)

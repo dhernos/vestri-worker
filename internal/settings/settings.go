@@ -14,6 +14,7 @@ type Settings struct {
 	RateLimitBurst         int     `json:"rate_limit_burst"`
 	MaxArchiveRequestBytes int64   `json:"max_archive_request_bytes"`
 	MaxInlineWriteBytes    int64   `json:"max_inline_write_bytes"`
+	MaxInlineReadBytes     int64   `json:"max_inline_read_bytes"`
 	MaxUploadBytes         int64   `json:"max_upload_bytes"`
 	MaxUnzipBytes          int64   `json:"max_unzip_bytes"`
 	MaxZipEntries          int     `json:"max_zip_entries"`
@@ -34,6 +35,7 @@ func Default() Settings {
 		RateLimitBurst:         20,
 		MaxArchiveRequestBytes: 1 << 20,
 		MaxInlineWriteBytes:    10 << 20,
+		MaxInlineReadBytes:     8 << 20,
 		MaxUploadBytes:         1 << 30,
 		MaxUnzipBytes:          10 << 30,
 		MaxZipEntries:          100000,

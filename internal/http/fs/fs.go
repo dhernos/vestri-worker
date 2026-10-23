@@ -3,6 +3,8 @@ package fs
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,7 +32,7 @@ func ReadFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := os.ReadFile(fullPath)
+	info, err := os.Lstat(fullPath)
 	if err != nil {
 		logPathOpError(r, "read", path, err)
 		if os.IsNotExist(err) {
@@ -39,6 +41,67 @@ func ReadFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "cannot read file", http.StatusInternalServerError)
 		return
+	}
+	if !info.Mode().IsRegular() {
+		err := fmt.Errorf("path is not a regular file")
+		logPathOpError(r, "read", path, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		logPathOpError(r, "read", path, err)
+		if os.IsNotExist(err) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "cannot read file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	info, err = file.Stat()
+	if err != nil {
+		logPathOpError(r, "read", path, err)
+		http.Error(w, "cannot read file", http.StatusInternalServerError)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		err := fmt.Errorf("path is not a regular file")
+		logPathOpError(r, "read", path, err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	limit := maxInlineReadBytes()
+	if info.Size() > limit {
+		err := fmt.Errorf("file exceeds inline read limit")
+		logPathOpError(r, "read", path, err)
+		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit))
+	if err != nil {
+		logPathOpError(r, "read", path, err)
+		http.Error(w, "cannot read file", http.StatusInternalServerError)
+		return
+	}
+	if int64(len(data)) == limit {
+		var extra [1]byte
+		n, readErr := file.Read(extra[:])
+		if n > 0 {
+			err := fmt.Errorf("file exceeds inline read limit")
+			logPathOpError(r, "read", path, err)
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		if readErr != nil && readErr != io.EOF {
+			logPathOpError(r, "read", path, readErr)
+			http.Error(w, "cannot read file", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if _, err := w.Write(data); err != nil {

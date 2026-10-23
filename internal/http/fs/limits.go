@@ -5,6 +5,7 @@ import "vestri-worker/internal/settings"
 const (
 	defaultMaxArchiveRequestBytes int64 = 1 << 20  // 1 MiB
 	defaultMaxInlineWriteBytes    int64 = 10 << 20 // 10 MiB
+	defaultMaxInlineReadBytes     int64 = 8 << 20  // 8 MiB
 	defaultMaxUploadBytes         int64 = 1 << 30  // 1 GiB
 	defaultMaxUnzipBytes          int64 = 10 << 30 // 10 GiB
 	defaultMaxZipEntries          int   = 100000
@@ -22,6 +23,13 @@ func maxInlineWriteBytes() int64 {
 		return v
 	}
 	return defaultMaxInlineWriteBytes
+}
+
+func maxInlineReadBytes() int64 {
+	if v := settings.Get().MaxInlineReadBytes; v > 0 {
+		return v
+	}
+	return defaultMaxInlineReadBytes
 }
 
 func maxUploadBytes() int64 {

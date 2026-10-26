@@ -17,6 +17,10 @@ import (
 
 var startBackupScheduler sync.Once
 
+func init() {
+	backup.WithServerStopped = stack.WithStackStopped
+}
+
 func startScheduler() {
 	startBackupScheduler.Do(backup.StartScheduler)
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,11 +15,11 @@ import (
 var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func parseStackName(r *http.Request) (string, error) {
-	stackPath, _, err := parseStackTarget(r, true)
+	stackPath, _, err := parseStackTarget(r)
 	return stackPath, err
 }
 
-func parseStackTarget(r *http.Request, ensureDirectory bool) (string, string, error) {
+func parseStackTarget(r *http.Request) (string, string, error) {
 	type Req struct {
 		Stack string `json:"stack"`
 	}
@@ -43,12 +42,6 @@ func parseStackTarget(r *http.Request, ensureDirectory bool) (string, string, er
 	stackPath, err := fs.SafeSubPath(settings.FsBasePath, req.Stack)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid stack path: %w", err)
-	}
-
-	if ensureDirectory {
-		if err := os.MkdirAll(stackPath, 0755); err != nil {
-			return "", "", fmt.Errorf("failed to create stack directory: %w", err)
-		}
 	}
 
 	return stackPath, filepath.Base(stackPath), nil

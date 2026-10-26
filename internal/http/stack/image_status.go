@@ -43,7 +43,7 @@ func StackImageStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stackPath, stackName, err := parseStackTarget(r, false)
+	stackPath, stackName, err := parseStackTarget(r)
 	if err != nil {
 		logStackOpError(r, "image-status", "", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)

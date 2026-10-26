@@ -282,7 +282,7 @@ func stackExecSessionCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stackPath, stackName, err := parseStackTarget(r, false)
+	stackPath, stackName, err := parseStackTarget(r)
 	if err != nil {
 		logStackOpError(r, "exec session create", "", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)

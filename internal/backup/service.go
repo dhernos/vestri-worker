@@ -42,6 +42,9 @@ type State struct {
 
 var rootLocks sync.Map
 
+// WithServerStopped is replaced by the HTTP layer to stop the server while its data is archived.
+var WithServerStopped = func(rootPath string, fn func() error) error { return fn() }
+
 func DefaultPolicy() Policy {
 	return Policy{Enabled: true, EveryDays: 1, Time: "04:00", KeepDailyDays: 7, KeepWeeklyWeeks: 4}
 }
@@ -129,7 +132,7 @@ func Create(root string) (Entry, error) {
 	}
 	tempName := temp.Name()
 	defer os.Remove(tempName)
-	if err := writeZip(temp, dataPath); err != nil {
+	if err := WithServerStopped(rootPath, func() error { return writeZip(temp, dataPath) }); err != nil {
 		_ = temp.Close()
 		return Entry{}, err
 	}

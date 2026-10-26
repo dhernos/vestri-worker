@@ -71,7 +71,7 @@ func StackLogsStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stackPath, stackName, err := parseStackTarget(r, false)
+	stackPath, stackName, err := parseStackTarget(r)
 	if err != nil {
 		logStackOpError(r, "logs stream", "", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -232,7 +232,7 @@ func StackLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stackPath, stackName, err := parseStackTarget(r, false)
+	stackPath, stackName, err := parseStackTarget(r)
 	if err != nil {
 		logStackOpError(r, "logs ws", "", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -377,7 +377,7 @@ func StackExecWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stackPath, stackName, err := parseStackTarget(r, false)
+	stackPath, stackName, err := parseStackTarget(r)
 	if err != nil {
 		logStackOpError(r, "exec ws", "", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)

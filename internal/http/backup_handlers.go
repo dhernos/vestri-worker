@@ -121,7 +121,9 @@ func backupRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		backupError(w, err)
 		return
 	}
+	unlock := stack.LockStack(stackPath)
 	output, err := stack.RunCompose(stackPath, "down")
+	unlock()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("could not stop server: %s", strings.TrimSpace(output)), http.StatusConflict)
 		return

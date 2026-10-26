@@ -71,6 +71,7 @@ func StackUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	out, err := RunCompose(stackPath, "up", "-d")
 	if err != nil {
@@ -97,6 +98,7 @@ func StackDownHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	out, err := RunCompose(stackPath, "down")
 	if err != nil {
@@ -123,6 +125,7 @@ func StackPullHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	out, err := RunCompose(stackPath, "pull")
 	if err != nil {
@@ -149,6 +152,7 @@ func StackRestartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	if out, err := RunCompose(stackPath, "down"); err != nil {
 		logStackOpError(r, "restart down", stackName, err)

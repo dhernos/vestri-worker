@@ -3,11 +3,29 @@ package stack
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 )
+
+var stackLocks sync.Map
+
+// LockStack serializes state-changing compose commands per stack; concurrent up/down calls make compose fail.
+func LockStack(stackPath string) (unlock func()) {
+	key := stackPath
+	if abs, err := filepath.Abs(stackPath); err == nil {
+		key = abs
+	}
+	value, _ := stackLocks.LoadOrStore(filepath.Clean(key), &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
+}
 
 // WithStackStopped runs fn with the stack taken down, then starts it again if it was running before.
 func WithStackStopped(stackPath string, fn func() error) error {
+	defer LockStack(stackPath)()
+
 	composeFile, err := composeFilePath(stackPath)
 	if err != nil {
 		return err

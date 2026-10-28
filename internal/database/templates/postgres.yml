@@ -1,0 +1,32 @@
+name: "{{.Project}}"
+services:
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "{{.Database}}"
+      POSTGRES_USER: "vestri_admin"
+      POSTGRES_PASSWORD: "{{.RootPassword}}"
+    volumes:
+      - data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/10-plugin-user.sql:ro
+    networks:
+      server:
+        aliases:
+          - "{{.Host}}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vestri_admin -d {{.Database}}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  data:
+networks:
+  server:
+    external: true
+    name: "{{.Network}}"

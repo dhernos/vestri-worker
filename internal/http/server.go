@@ -12,6 +12,7 @@ func router() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/databases", databaseHandler)
 	mux.HandleFunc("/fs/read", fs.ReadFileHandler)
 	mux.HandleFunc("/fs/write", fs.WriteFileHandler)
 	mux.HandleFunc("/fs/mkdir", fs.MkdirHandler)

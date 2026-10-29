@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// SafePath confines a path to base and rejects symlinks and mount crossings.
+func SafePath(base, userPath string) (string, error) {
+	return safePath(base, userPath)
+}
+
 func safePath(base, userPath string) (string, error) {
 	full, err := SafeSubPath(base, userPath)
 	if err != nil {

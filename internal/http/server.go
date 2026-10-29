@@ -37,6 +37,8 @@ func router() http.Handler {
 	mux.HandleFunc("/stack/pull", stack.StackPullHandler)
 	mux.HandleFunc("/stack/restart", stack.StackRestartHandler)
 	mux.HandleFunc("/stack/status", stack.StackStatusHandler)
+	mux.HandleFunc("/stack/bluemap/status", stack.BlueMapHandler)
+	mux.HandleFunc("/stack/bluemap/view/", stack.BlueMapHandler)
 	mux.HandleFunc("/stack/image-status", stack.StackImageStatusHandler)
 	mux.HandleFunc("/stack/logs/stream", stack.StackLogsStreamHandler)
 	mux.HandleFunc("/stack/logs/ws", stack.StackLogsWebSocketHandler)

@@ -4,6 +4,31 @@ Worker documentation lives in the main repository:
 
 - https://github.com/dhernos/vestri
 
+## Request Rate Limits
+
+The worker defaults to 100 requests per second with a burst allowance of 200 per
+authenticated API key. This accommodates the filesystem request bursts used when
+provisioning dynamic Minecraft servers. Rate limiting and authentication remain
+enabled; BlueMap assets retain their separate budget described below.
+
+Existing settings are not overwritten on upgrade. On native installations, update
+these fields in `/etc/vestri/settings.json` if they still contain the old 10/20
+values, preserving all other settings:
+
+```json
+"rate_limit_rps": 100,
+"rate_limit_burst": 200
+```
+
+Restart the worker after changing its settings:
+
+```sh
+sudo systemctl restart vestri_worker.service
+```
+
+Omitted fields use the defaults from the installed worker version. Explicit custom
+values remain unchanged.
+
 ## Managed Plugin Databases
 
 The worker embeds MariaDB 11.4 and PostgreSQL 17 Compose templates in `internal/database/templates`. Managed databases join the game's existing Docker network without publishing host ports. Docker Compose with JSON configuration/status support is required.

@@ -17,7 +17,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		ExternalService: "OK",
 	}
 
-	// Einfacher Ping zu Google
+	// Einfacher Ping
 	client := http.Client{
 		Timeout: 2 * time.Second,
 	}

@@ -32,7 +32,14 @@ func rateLimitMiddleware() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cfg := settings.Get()
-			if !limiter.allow(rateLimitKey(r), cfg.RateLimitRPS, cfg.RateLimitBurst) {
+			key, rate, burst := rateLimitKey(r), cfg.RateLimitRPS, cfg.RateLimitBurst
+			if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/stack/bluemap/view/") {
+				// Tile loading needs a separate, larger budget without starving control requests.
+				key += ":bluemap"
+				rate *= 20
+				burst *= 20
+			}
+			if !limiter.allow(key, rate, burst) {
 				w.Header().Set("Retry-After", "1")
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return

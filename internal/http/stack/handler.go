@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"vestri-worker/internal/http/fs"
 	"vestri-worker/internal/settings"
@@ -15,6 +15,11 @@ import (
 var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func parseStackName(r *http.Request) (string, error) {
+	stackPath, _, err := parseStackTarget(r)
+	return stackPath, err
+}
+
+func parseStackTarget(r *http.Request) (string, string, error) {
 	type Req struct {
 		Stack string `json:"stack"`
 	}
@@ -24,25 +29,33 @@ func parseStackName(r *http.Request) (string, error) {
 		req.Stack = r.URL.Query().Get("stack")
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return "", fmt.Errorf("bad request: %w", err)
+			return "", "", fmt.Errorf("bad request: %w", err)
 		}
 	}
 
+	req.Stack = strings.TrimSpace(req.Stack)
 	if req.Stack == "" || !validName.MatchString(req.Stack) {
-		return "", fmt.Errorf("invalid stack name")
+		return "", "", fmt.Errorf("invalid stack name")
 	}
 
 	settings := settings.Get()
 	stackPath, err := fs.SafeSubPath(settings.FsBasePath, req.Stack)
 	if err != nil {
-		return "", fmt.Errorf("invalid stack path: %w", err)
+		return "", "", fmt.Errorf("invalid stack path: %w", err)
 	}
 
-	if err := os.MkdirAll(stackPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create stack directory: %w", err)
-	}
+	return stackPath, filepath.Base(stackPath), nil
+}
 
-	return stackPath, nil
+func parseServiceName(r *http.Request) (string, error) {
+	service := strings.TrimSpace(r.URL.Query().Get("service"))
+	if service == "" {
+		return "", nil
+	}
+	if !validName.MatchString(service) {
+		return "", fmt.Errorf("invalid service name")
+	}
+	return service, nil
 }
 
 func StackUpHandler(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +71,7 @@ func StackUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	out, err := RunCompose(stackPath, "up", "-d")
 	if err != nil {
@@ -84,6 +98,7 @@ func StackDownHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	out, err := RunCompose(stackPath, "down")
 	if err != nil {
@@ -95,6 +110,33 @@ func StackDownHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(out))
 	logStackOp(r, "down", stackName)
+}
+
+func StackPullHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stackPath, err := parseStackName(r)
+	if err != nil {
+		logStackOpError(r, "pull", "", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
+
+	out, err := RunCompose(stackPath, "pull")
+	if err != nil {
+		logStackOpError(r, "pull", stackName, err)
+		http.Error(w, out, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(out))
+	logStackOp(r, "pull", stackName)
 }
 
 func StackRestartHandler(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +152,7 @@ func StackRestartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stackName := filepath.Base(stackPath)
+	defer LockStack(stackPath)()
 
 	if out, err := RunCompose(stackPath, "down"); err != nil {
 		logStackOpError(r, "restart down", stackName, err)

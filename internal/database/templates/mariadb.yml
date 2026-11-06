@@ -1,0 +1,32 @@
+name: "{{.Project}}"
+services:
+  database:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: "{{.Database}}"
+      MARIADB_USER: "{{.Username}}"
+      MARIADB_PASSWORD: "{{.Password}}"
+      MARIADB_ROOT_PASSWORD: "{{.RootPassword}}"
+    volumes:
+      - data:/var/lib/mysql
+    networks:
+      server:
+        aliases:
+          - "{{.Host}}"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  data:
+networks:
+  server:
+    external: true
+    name: "{{.Network}}"

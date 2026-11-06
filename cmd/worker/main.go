@@ -25,6 +25,18 @@ func main() {
 	}
 
 	cfg := settings.Get()
+	if cfg.UseTLS {
+		certPath, keyPath, caCertPath, generated, err := settings.EnsureTLSAssets()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if generated {
+			log.Printf("generated TLS assets cert=%s key=%s ca=%s", certPath, keyPath, caCertPath)
+			log.Printf("trust this CA certificate on backend hosts: %s", caCertPath)
+		}
+		cfg = settings.Get()
+	}
+
 	if settings.GetAPIKey() != "" && !cfg.UseTLS && !cfg.TrustProxyHeaders && !cfg.RequireTLS {
 		log.Println("warning: API key is sent over plaintext HTTP without TLS")
 	}

@@ -17,15 +17,10 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		ExternalService: "OK",
 	}
 
-	// Einfacher Ping
 	client := http.Client{
 		Timeout: 2 * time.Second,
 	}
-	resp, err := client.Head("https://www.github.com")
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if !externalConnectivity(r, &client) {
 		status.ExternalService = "NOT OK"
 	}
 
@@ -36,4 +31,21 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 	json.NewEncoder(w).Encode(status)
+}
+
+func externalConnectivity(r *http.Request, client *http.Client) bool {
+	for _, endpoint := range []string{"https://www.github.com", "https://www.cloudflare.com"} {
+		request, err := http.NewRequestWithContext(r.Context(), http.MethodHead, endpoint, nil)
+		if err != nil {
+			continue
+		}
+		response, err := client.Do(request)
+		if response != nil {
+			response.Body.Close()
+		}
+		if err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
+			return true
+		}
+	}
+	return false
 }
